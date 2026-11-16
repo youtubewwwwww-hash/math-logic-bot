@@ -22,7 +22,7 @@ if not BOT_TOKEN or not GEMINI_API_KEY:
 bot = Bot(token=BOT_TOKEN)
 dp = Dispatcher()
 client = genai.Client(api_key=GEMINI_API_KEY)
-MODEL_NAME = "gemini-1.5-flash"
+MODEL_NAME = "gemini-2.0-flash"
 
 # Asosiy menyu
 def get_main_menu():
@@ -71,7 +71,6 @@ async def handle_message(message: types.Message):
     wait_msg = await message.answer("💡 Tahlil qilinmoqda...")
 
     try:
-        # Promptni va rasm/matnni to'g'ri formatda shakllantirish
         prompt = f"Siz matematika va mantiq o'qituvchisisiz. Ushbu masalani o'zbek tilida qadam-baqadam yechib bering:\n\n{user_text}"
         contents = [prompt]
 
@@ -96,7 +95,6 @@ async def handle_message(message: types.Message):
             await bot.delete_message(message.chat.id, wait_msg.message_id)
         except:
             pass
-        # Aniq xatolikni ko'rsatamiz
         await message.answer(f"❌ Xatolik yuz berdi:\n`{e}`", parse_mode="Markdown", reply_markup=get_main_menu())
 
 async def main():
