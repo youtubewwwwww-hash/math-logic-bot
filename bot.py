@@ -8,11 +8,9 @@ from aiogram.utils.keyboard import InlineKeyboardBuilder
 from google import genai
 from PIL import Image
 
-# Loggingni sozlash
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-# Token va API kalitlarni olish
 BOT_TOKEN = os.getenv("BOT_TOKEN")
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
 
@@ -22,9 +20,9 @@ if not BOT_TOKEN or not GEMINI_API_KEY:
 bot = Bot(token=BOT_TOKEN)
 dp = Dispatcher()
 client = genai.Client(api_key=GEMINI_API_KEY)
-MODEL_NAME = "gemini-3.8-flash"
+# Tezlikni oshirish uchun eng tezkor model
+MODEL_NAME = "gemini-2.5-flash"
 
-# Asosiy menyu
 def get_main_menu():
     builder = InlineKeyboardBuilder()
     builder.row(types.InlineKeyboardButton(text="📊 To'plamlar nazariyasi", callback_data="menu_sets"))
@@ -34,11 +32,15 @@ def get_main_menu():
     builder.row(types.InlineKeyboardButton(text="💡 Boshqa savollar (Erkin rejim)", callback_data="menu_free"))
     return builder.as_markup()
 
+async def set_bot_commands(bot: Bot):
+    await bot.set_my_commands([types.BotCommand(command="start", description="Botni qayta ishga tushirish")])
+
 @dp.message(Command("start"))
 async def start_handler(message: types.Message):
     await message.answer(
-        "Assalomu alaykum! Men Math Logic Helper botiman.\n\n"
-        "Menga matematika, mantiq yoki istalgan mavzuda savol yuboring (rasm yoki matn):",
+        "🤖 **Math Logic Helper** — Sizning aqlli yordamchingiz!\n\n"
+        "📊 Matematika, mantiq yoki istalgan mavzuda savol yuboring (rasm yoki matn):",
+        parse_mode="Markdown",
         reply_markup=get_main_menu()
     )
 
@@ -68,10 +70,10 @@ async def handle_message(message: types.Message):
         return
 
     user_text = message.text or message.caption or "Ushbu masalani yechib bering:"
-    wait_msg = await message.answer("💡 Tahlil qilinmoqda...")
+    wait_msg = await message.answer("⚡️ Tezkor tahlil qilinmoqda...")
 
     try:
-        prompt = f"Siz matematika va mantiq o'qituvchisisiz. Ushbu masalani o'zbek tilida qadam-baqadam yechib bering:\n\n{user_text}"
+        prompt = f"Matematika va mantiq o'qituvchisisiz. Ushbu savolni tez va aniq yechib bering:\n\n{user_text}"
         contents = [prompt]
 
         if message.photo:
@@ -81,14 +83,14 @@ async def handle_message(message: types.Message):
             image = Image.open(io.BytesIO(file_bytes.read()))
             contents.append(image)
 
-        # Bloklanib qolmasligi uchun alohida oqimda (thread) ishlatamiz va 30 sekund timeout qo'yamiz
+        # Timeout vaqtini 35 sekundga qo'yamiz va eng tez modelni ishlatamiz
         response = await asyncio.wait_for(
             asyncio.to_thread(
                 client.models.generate_content,
                 model=MODEL_NAME,
                 contents=contents
             ),
-            timeout=30.0
+            timeout=35.0
         )
 
         await bot.delete_message(message.chat.id, wait_msg.message_id)
@@ -99,7 +101,7 @@ async def handle_message(message: types.Message):
             await bot.delete_message(message.chat.id, wait_msg.message_id)
         except:
             pass
-        await message.answer("⚠️ Server javob berishni kechiktirdi (timeout). Iltimos, qaytadan urinib ko'ring.", reply_markup=get_main_menu())
+        await message.answer("⚠️ Server biroz kechikdi. Qaytadan yuborib ko'ring.", reply_markup=get_main_menu())
 
     except Exception as e:
         logger.error(f"Xatolik: {e}")
@@ -111,6 +113,7 @@ async def handle_message(message: types.Message):
 
 async def main():
     await bot.delete_webhook(drop_pending_updates=True)
+    await set_bot_commands(bot)
     await dp.start_polling(bot)
 
 if __name__ == "__main__":
