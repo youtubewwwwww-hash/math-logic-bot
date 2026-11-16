@@ -8,7 +8,7 @@ from aiogram.utils.keyboard import InlineKeyboardBuilder
 from google import genai
 from PIL import Image
 
-# Loggingni sozlash (xatoliklarni kuzatib borish uchun)
+# Loggingni sozlash
 logging.basicConfig(
     format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
     level=logging.INFO
@@ -28,28 +28,28 @@ if not GEMINI_API_KEY:
 bot = Bot(token=BOT_TOKEN)
 dp = Dispatcher()
 client = genai.Client(api_key=GEMINI_API_KEY)
-MODEL_NAME = "gemini-3.8-flash"
+MODEL_NAME = "gemini-1.5-flash"
 
-# Asosiy menyu tugmalarini shakllantirish funksiyasi
+# Asosiy menyu tugmalari
 def get_main_menu():
     builder = InlineKeyboardBuilder()
     builder.row(types.InlineKeyboardButton(text="📊 To'plamlar nazariyasi", callback_data="menu_sets"))
     builder.row(types.InlineKeyboardButton(text="🔢 Kombinatorika", callback_data="menu_combinatorics"))
     builder.row(types.InlineKeyboardButton(text="🔗 Munosabatlar", callback_data="menu_relations"))
     builder.row(types.InlineKeyboardButton(text="🧠 Mantiq", callback_data="menu_logic"))
+    builder.row(types.InlineKeyboardButton(text="💡 Boshqa savollar (Erkin rejim)", callback_data="menu_free"))
     return builder.as_markup()
 
-# /start buyrug'i uchun handler
+# /start buyrug'i
 @dp.message(Command("start"))
 async def start_handler(message: types.Message):
     text = (
         "Assalomu alaykum! Men **Math Logic Helper** botiman.\n\n"
-        "Menga istalgan matematika yoki mantiqiy masalaning rasmini yuboring "
-        "yoki matn ko'rinishida yozing, uni qadam-baqadam va tushunarli qilib yechib beraman!"
+        "Quyidagi bo'limlardan birini tanlang yoki istalgan savolingizni yuboring:"
     )
     await message.answer(text, parse_mode="Markdown", reply_markup=get_main_menu())
 
-# Inline menyular bosilganda ishlovchi handler
+# Menyular bosilganda
 @dp.callback_query(F.data.startswith("menu_"))
 async def menu_callback_handler(callback: types.CallbackQuery):
     action = callback.data.split("_")[1]
@@ -58,7 +58,8 @@ async def menu_callback_handler(callback: types.CallbackQuery):
         "sets": "📊 **To'plamlar nazariyasi** bo'yicha savol yoki masalaning matni / rasmini yuboring.",
         "combinatorics": "🔢 **Kombinatorika** bo'yicha masalaning shartini yoki rasmini yuboring.",
         "relations": "🔗 **Munosabatlar** bo'yicha savol yoki masalani yuboring.",
-        "logic": "🧠 **Mantiqiy masala** yoki mulohazalar algebraasiga doir savol yuboring."
+        "logic": "🧠 **Mantiqiy masala** yoki mulohazalar algebraasiga doir savol yuboring.",
+        "free": "💡 **Erkin rejim:** Matematikadan tashqari istalgan mavzuda savolingizni yuboring, javob beraman!"
     }
     
     builder = InlineKeyboardBuilder()
@@ -80,29 +81,25 @@ async def back_to_main_handler(callback: types.CallbackQuery):
     )
     await callback.answer()
 
-# Rasm va matnli xabarlarni qabul qilib, Gemini orqali tahlil qilish
+# Matn va rasmlarni qabul qilib javob berish
 @dp.message(F.photo | F.text)
 async def handle_content(message: types.Message):
-    # Komanda xabarlarini o'tkazib yubormaslik uchun tekshiruv
     if message.text and message.text.startswith("/"):
         return
 
-    user_text = message.text or message.caption or "Ushbu masalani to'liq va tushunarli qilib yechib bering:"
-    
-    # Foydalanuvchiga jarayon boshlanganini bildirish
-    processing_msg = await message.answer("💡 Masalangiz tahlil qilinmoqda, iltimos kuting...")
+    user_text = message.text or message.caption or "Ushbu savolga javob bering:"
+    processing_msg = await message.answer("💡 Tahlil qilinmoqda, iltimos kuting...")
 
     try:
         contents = []
         system_instruction = (
-            "Siz professional matematika va mantiq o'qituvchisisiz. "
-            "Foydalanuvchi yuborgan masala, rasm yoki savolni o'zbek tilida, "
-            "juda aniq, mantiqiy va qadam-baqadam izohlab bering."
+            "Siz aqlli, har tomonlama bilimdon va yordam berishga tayyor sun'iy intellekt yordamchisisiz. "
+            "Foydalanuvchi yuborgan savolga (xoh u matematika, xoh boshqa mavzu bo'lsin) "
+            "o'zbek tilida aniq, to'liq va tushunarli qilib javob bering."
         )
         contents.append(system_instruction)
-        contents.append(f"Masala sharti: {user_text}")
+        contents.append(f"Savol: {user_text}")
 
-        # Agar foydalanuvchi rasm yuborgan bo'lsa, uni yuklab olib Gemini'ga qo'shamiz
         if message.photo:
             photo = message.photo[-1]
             file_info = await bot.get_file(photo.file_id)
@@ -110,16 +107,12 @@ async def handle_content(message: types.Message):
             image = Image.open(io.BytesIO(file_bytes.read()))
             contents.append(image)
 
-        # Gemini modelidan javob olish
         response = client.models.generate_content(
             model=MODEL_NAME,
             contents=contents,
         )
         
-        # Kutish xabarini o'chirish
         await bot.delete_message(chat_id=message.chat.id, message_id=processing_msg.message_id)
-        
-        # Javobni yuborish va asosiy menyuni biriktirish
         await message.answer(response.text, reply_markup=get_main_menu())
         
     except Exception as e:
@@ -129,20 +122,12 @@ async def handle_content(message: types.Message):
         except:
             pass
         
-        error_str = str(e)
-        if "503" in error_str or "UNAVAILABLE" in error_str:
-            await message.answer(
-                "⚠️ Serverda vaqtinchalik yuqori yuklama kuzatilmoqda. "
-                "Iltimos, 1-2 daqiqadan so'ng qayta urinib ko'ring.",
-                reply_markup=get_main_menu()
-            )
-        else:
-            await message.answer(
-                f"❌ Xatolik yuz berdi: {e}\nIltimos, keyinroq qayta urinib ko'ring.",
-                reply_markup=get_main_menu()
-            )
+        await message.answer(
+            "⚠️ Xatolik yuz berdi. Iltimos, bir ozdan keyin qayta urinib ko'ring.",
+            reply_markup=get_main_menu()
+        )
 
-# Botni ishga tushirish funksiyasi
+# Botni ishga tushirish
 async def main():
     logger.info("Bot ishga tushmoqda...")
     await bot.delete_webhook(drop_pending_updates=True)
