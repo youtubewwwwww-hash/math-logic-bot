@@ -2,10 +2,11 @@ import os
 import logging
 import io
 import asyncio
+import base64
 from aiogram import Bot, Dispatcher, types, F
 from aiogram.filters import Command
 from aiogram.utils.keyboard import InlineKeyboardBuilder
-from google import genai
+from openai import OpenAI
 from PIL import Image
 
 # Loggingni sozlash
@@ -14,15 +15,15 @@ logger = logging.getLogger(__name__)
 
 # Token va API kalitlarni olish
 BOT_TOKEN = os.getenv("BOT_TOKEN")
-GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
+OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 
-if not BOT_TOKEN or not GEMINI_API_KEY:
-    raise ValueError("Token yoki API kalit topilmadi!")
+if not BOT_TOKEN or not OPENAI_API_KEY:
+    raise ValueError("BOT_TOKEN yoki OPENAI_API_KEY topilmadi!")
 
 bot = Bot(token=BOT_TOKEN)
 dp = Dispatcher()
-client = genai.Client(api_key=GEMINI_API_KEY)
-MODEL_NAME = "gemini-3.8-flash"
+client = OpenAI(api_key=OPENAI_API_KEY)
+MODEL_NAME = "gpt-4o-mini"
 
 # Asosiy menyu
 def get_main_menu():
@@ -37,7 +38,7 @@ def get_main_menu():
 @dp.message(Command("start"))
 async def start_handler(message: types.Message):
     await message.answer(
-        "Assalomu alaykum! Men Math Logic Helper botiman.\n\n"
+        "Assalomu alaykum! Men Math Logic Helper botiman (ChatGPT orqali ishlayman).\n\n"
         "Menga matematika, mantiq yoki istalgan mavzuda savol yuboring (rasm yoki matn):",
         reply_markup=get_main_menu()
     )
@@ -71,23 +72,56 @@ async def handle_message(message: types.Message):
     wait_msg = await message.answer("💡 Tahlil qilinmoqda...")
 
     try:
-        prompt = f"Siz matematika va mantiq o'qituvchisisiz. Ushbu masalani o'zbek tilida qadam-baqadam yechib bering:\n\n{user_text}"
-        contents = [prompt]
+        messages = [
+            {
+                "role": "system", 
+                "content": "Siz professional matematika va mantiq o'qituvchisisiz. Berilgan masala yoki savolni o'zbek tilida qadam-baqadam yechib bering."
+            }
+        ]
 
         if message.photo:
             photo = message.photo[-1]
             file_info = await bot.get_file(photo.file_id)
             file_bytes = await bot.download_file(file_info.file_path)
-            image = Image.open(io.BytesIO(file_bytes.read()))
-            contents.append(image)
+            encoded_image = base64.b64encode(file_bytes.read()).decode('utf-8')
+            
+            messages.append({
+                "role": "user",
+                "content": [
+                    {"type": "text", "text": user_text},
+                    {
+                        "type": "image_url",
+                        "image_url": {
+                            "url": f"data:image/jpeg;base64,{encoded_image}"
+                        }
+                    }
+                ]
+            })
+        else:
+            messages.append({"role": "user", "content": user_text})
 
-        response = client.models.generate_content(
-            model=MODEL_NAME,
-            contents=contents
+        # OpenAI API so'rovini alohida oqimda va 30 sekund timeout bilan yuboramiz
+        response = await asyncio.wait_for(
+            asyncio.to_thread(
+                client.chat.completions.create,
+                model=MODEL_NAME,
+                messages=messages,
+                max_tokens=1500
+            ),
+            timeout=30.0
         )
 
+        answer_text = response.choices[0].message.content
+
         await bot.delete_message(message.chat.id, wait_msg.message_id)
-        await message.answer(response.text, reply_markup=get_main_menu())
+        await message.answer(answer_text, reply_markup=get_main_menu())
+
+    except asyncio.TimeoutError:
+        try:
+            await bot.delete_message(message.chat.id, wait_msg.message_id)
+        except:
+            pass
+        await message.answer("⚠️ Server javob berishni kechiktirdi (timeout). Iltimos, qaytadan urinib ko'ring.", reply_markup=get_main_menu())
 
     except Exception as e:
         logger.error(f"Xatolik: {e}")
