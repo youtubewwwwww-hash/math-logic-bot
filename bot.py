@@ -20,8 +20,8 @@ if not BOT_TOKEN or not GEMINI_API_KEY:
 bot = Bot(token=BOT_TOKEN)
 dp = Dispatcher()
 client = genai.Client(api_key=GEMINI_API_KEY)
-# Tezlikni oshirish uchun eng tezkor model
-MODEL_NAME = "gemini-2.5-flash"
+# Google talab qilayotgan va Interactions API'ni qo'llab-quvvatlaydigan model
+MODEL_NAME = "gemini-3.8-flash"
 
 def get_main_menu():
     builder = InlineKeyboardBuilder()
@@ -70,10 +70,11 @@ async def handle_message(message: types.Message):
         return
 
     user_text = message.text or message.caption or "Ushbu masalani yechib bering:"
-    wait_msg = await message.answer("⚡️ Tezkor tahlil qilinmoqda...")
+    wait_msg = await message.answer("⚡️ Tahlil qilinmoqda...")
 
     try:
-        prompt = f"Matematika va mantiq o'qituvchisisiz. Ushbu savolni tez va aniq yechib bering:\n\n{user_text}"
+        # Google Interactions API standartiga mos ravishda chats/interactions orqali chaqiramiz
+        prompt = f"Matematika va mantiq o'qituvchisisiz. Ushbu savolni o'zbek tilida qadam-baqadam yechib bering:\n\n{user_text}"
         contents = [prompt]
 
         if message.photo:
@@ -83,12 +84,11 @@ async def handle_message(message: types.Message):
             image = Image.open(io.BytesIO(file_bytes.read()))
             contents.append(image)
 
-        # Timeout vaqtini 35 sekundga qo'yamiz va eng tez modelni ishlatamiz
+        # Interactions API orqali so'rov yuborish
         response = await asyncio.wait_for(
             asyncio.to_thread(
-                client.models.generate_content,
-                model=MODEL_NAME,
-                contents=contents
+                client.chats.create(model=MODEL_NAME).send_message,
+                contents
             ),
             timeout=35.0
         )
