@@ -10,7 +10,7 @@ from PIL import Image
 
 # Loggingni sozlash
 logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger(name)
+logger = logging.getLogger(__name__)
 
 # Token va API kalitlarni olish
 BOT_TOKEN = os.getenv("BOT_TOKEN")
@@ -81,13 +81,25 @@ async def handle_message(message: types.Message):
             image = Image.open(io.BytesIO(file_bytes.read()))
             contents.append(image)
 
-        response = client.models.generate_content(
-            model=MODEL_NAME,
-            contents=contents
+        # Bloklanib qolmasligi uchun alohida oqimda (thread) ishlatamiz va 30 sekund timeout qo'yamiz
+        response = await asyncio.wait_for(
+            asyncio.to_thread(
+                client.models.generate_content,
+                model=MODEL_NAME,
+                contents=contents
+            ),
+            timeout=30.0
         )
 
         await bot.delete_message(message.chat.id, wait_msg.message_id)
         await message.answer(response.text, reply_markup=get_main_menu())
+
+    except asyncio.TimeoutError:
+        try:
+            await bot.delete_message(message.chat.id, wait_msg.message_id)
+        except:
+            pass
+        await message.answer("⚠️ Server javob berishni kechiktirdi (timeout). Iltimos, qaytadan urinib ko'ring.", reply_markup=get_main_menu())
 
     except Exception as e:
         logger.error(f"Xatolik: {e}")
@@ -95,11 +107,11 @@ async def handle_message(message: types.Message):
             await bot.delete_message(message.chat.id, wait_msg.message_id)
         except:
             pass
-        await message.answer(f"❌ Xatolik yuz berdi:\n{e}", parse_mode="Markdown", reply_markup=get_main_menu())
+        await message.answer(f"❌ Xatolik yuz berdi:\n`{e}`", parse_mode="Markdown", reply_markup=get_main_menu())
 
 async def main():
     await bot.delete_webhook(drop_pending_updates=True)
     await dp.start_polling(bot)
 
-if name == "main":
+if __name__ == "__main__":
     asyncio.run(main())
