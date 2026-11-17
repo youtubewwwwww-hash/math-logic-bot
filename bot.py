@@ -1,12 +1,10 @@
 import os
 import logging
-import io
 import asyncio
-import aiohttp
 from aiogram import Bot, Dispatcher, types, F
 from aiogram.filters import Command
 from aiogram.utils.keyboard import InlineKeyboardBuilder
-from PIL import Image
+from google import genai
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -19,6 +17,7 @@ if not BOT_TOKEN or not GEMINI_API_KEY:
 
 bot = Bot(token=BOT_TOKEN)
 dp = Dispatcher()
+client = genai.Client(api_key=GEMINI_API_KEY)
 MODEL_NAME = "gemini-1.5-flash"
 
 def get_main_menu():
@@ -34,7 +33,7 @@ def get_main_menu():
 async def start_handler(message: types.Message):
     await message.answer(
         "🤖 **Math Logic Helper** — Sizning aqlli yordamchingiz!\n\n"
-        "Matematika, mantiq yoki istalgan mavzuda matn yuboring:",
+        "Matematika, mantiq yoki istalgan mavzuda savol yuboring:",
         parse_mode="Markdown",
         reply_markup=get_main_menu()
     )
@@ -67,46 +66,30 @@ async def handle_message(message: types.Message):
     user_text = message.text
     wait_msg = await message.answer("⏳ Tahlil qilinmoqda...")
 
-    url = f"https://generativelanguage.googleapis.com/v1beta/models/{MODEL_NAME}:generateContent?key={GEMINI_API_KEY}"
-    headers = {"Content-Type": "application/json"}
-    payload = {
-        "contents": [{
-            "parts": [{"text": f"Matematika va mantiq o'qituvchisisiz. Ushbu savolni o'zbek tilida qadam-baqadam yechib bering:\n\n{user_text}"}]
-        }]
-    }
-
-    answer_text = None
-    async with aiohttp.ClientSession() as session:
-        for attempt in range(3):
-            try:
-                async with session.post(url, json=payload, headers=headers, timeout=30) as resp:
-                    if resp.status == 200:
-                        data = await resp.json()
-                        answer_text = data["candidates"][0]["content"]["parts"][0]["text"]
-                        break
-                    else:
-                        await asyncio.sleep(2)
-            except Exception as e:
-                logger.error(f"Urinish {attempt+1} xatosi: {e}")
-                await asyncio.sleep(2)
-
     try:
+        response = await asyncio.to_thread(
+            client.models.generate_content,
+            model=MODEL_NAME,
+            contents=user_text
+        )
+        
         await bot.delete_message(message.chat.id, wait_msg.message_id)
-    except:
-        pass
+        if response and response.text:
+            await message.answer(response.text, reply_markup=get_main_menu())
+        else:
+            await message.answer("⚠️ Sun'iy intellekt bo'sh javob qaytardi.", reply_markup=get_main_menu())
 
-    if answer_text:
-        await message.answer(answer_text, reply_markup=get_main_menu())
-    else:
-        await message.answer("❌ Serverdan javob olishda xatolik yuz berdi. Qaytadan urinib ko'ring.", reply_markup=get_main_menu())
+    except Exception as e:
+        logger.error(f"Xatolik tafsiloti: {e}")
+        try:
+            await bot.delete_message(message.chat.id, wait_msg.message_id)
+        except:
+            pass
+        await message.answer(f"❌ Xatolik yuz berdi:\n`{e}`", parse_mode="Markdown", reply_markup=get_main_menu())
 
 async def main():
     await bot.delete_webhook(drop_pending_updates=True)
     await bot.set_my_commands([types.BotCommand(command="start", description="Botni qayta ishga tushirish")])
-    try:
-        await bot.set_chat_menu_button(menu_button=types.MenuButtonCommands())
-    except:
-        pass
     await dp.start_polling(bot)
 
 if __name__ == "__main__":
