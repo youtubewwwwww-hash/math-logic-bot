@@ -18,7 +18,8 @@ if not BOT_TOKEN or not GEMINI_API_KEY:
 bot = Bot(token=BOT_TOKEN)
 dp = Dispatcher()
 client = genai.Client(api_key=GEMINI_API_KEY)
-MODEL_NAME = "gemini-1.5-flash"
+# Google talab qilayotgan to'g'ri model nomi
+MODEL_NAME = "gemini-3.8-flash"
 
 def get_main_menu():
     builder = InlineKeyboardBuilder()
