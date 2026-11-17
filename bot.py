@@ -18,8 +18,9 @@ if not BOT_TOKEN or not GEMINI_API_KEY:
 bot = Bot(token=BOT_TOKEN)
 dp = Dispatcher()
 client = genai.Client(api_key=GEMINI_API_KEY)
-# Google talab qilayotgan to'g'ri model nomi
-MODEL_NAME = "gemini-3.8-flash"
+
+# Navbatdagi modellar (biri band bo'lsa, ikkinchisiga o'tadi)
+MODELS = ["gemini-1.5-flash", "gemini-1.5-pro"]
 
 def get_main_menu():
     builder = InlineKeyboardBuilder()
@@ -67,26 +68,35 @@ async def handle_message(message: types.Message):
     user_text = message.text
     wait_msg = await message.answer("⏳ Tahlil qilinmoqda...")
 
-    try:
-        response = await asyncio.to_thread(
-            client.models.generate_content,
-            model=MODEL_NAME,
-            contents=user_text
-        )
+    response = None
+    # 503 xatosini chetlab o'tish uchun bir necha marta va turli modellar orqali urinib ko'ramiz
+    for attempt in range(3):
+        for model_name in MODELS:
+            try:
+                response = await asyncio.to_thread(
+                    client.models.generate_content,
+                    model=model_name,
+                    contents=user_text
+                )
+                if response and response.text:
+                    break
+            except Exception as e:
+                logger.warning(f"Urinish {attempt+1} ({model_name}) xatosi: {e}")
+                continue
         
-        await bot.delete_message(message.chat.id, wait_msg.message_id)
         if response and response.text:
-            await message.answer(response.text, reply_markup=get_main_menu())
-        else:
-            await message.answer("⚠️ Sun'iy intellekt bo'sh javob qaytardi.", reply_markup=get_main_menu())
+            break
+        await asyncio.sleep(2)  # 2 soniya kutib qayta urinadi
 
-    except Exception as e:
-        logger.error(f"Xatolik tafsiloti: {e}")
-        try:
-            await bot.delete_message(message.chat.id, wait_msg.message_id)
-        except:
-            pass
-        await message.answer(f"❌ Xatolik yuz berdi:\n`{e}`", parse_mode="Markdown", reply_markup=get_main_menu())
+    try:
+        await bot.delete_message(message.chat.id, wait_msg.message_id)
+    except:
+        pass
+
+    if response and response.text:
+        await message.answer(response.text, reply_markup=get_main_menu())
+    else:
+        await message.answer("⚠️ Serverlar vaqtincha band. Iltimos, bir ozdan keyin qayta urinib ko'ring.", reply_markup=get_main_menu())
 
 async def main():
     await bot.delete_webhook(drop_pending_updates=True)
