@@ -19,23 +19,29 @@ bot = Bot(token=BOT_TOKEN)
 dp = Dispatcher()
 client = genai.Client(api_key=GEMINI_API_KEY)
 
-# Navbatdagi modellar (biri band bo'lsa, ikkinchisiga o'tadi)
-MODELS = ["gemini-1.5-flash", "gemini-1.5-pro"]
+# Barcha mavjud modellar ro'yxati (qaysi biri tezroq javob bersa, o'sha tanlanadi)
+MODELS = [
+    "gemini-1.5-flash",
+    "gemini-1.5-pro",
+    "gemini-2.5-flash",
+    "gemini-3.8-flash"
+]
 
 def get_main_menu():
     builder = InlineKeyboardBuilder()
-    builder.row(types.InlineKeyboardButton(text="📊 To'plamlar nazariyasi", callback_data="menu_sets"))
-    builder.row(types.InlineKeyboardButton(text="🔢 Kombinatorika", callback_data="menu_combinatorics"))
-    builder.row(types.InlineKeyboardButton(text="🔗 Munosabatlar", callback_data="menu_relations"))
-    builder.row(types.InlineKeyboardButton(text="🧠 Mantiq", callback_data="menu_logic"))
-    builder.row(types.InlineKeyboardButton(text="💡 Boshqa savollar (Erkin rejim)", callback_data="menu_free"))
+    builder.row(types.InlineKeyboardButton(text="🔹 Bul algebrasi va Mulohazalar", callback_data="menu_boolean"))
+    builder.row(types.InlineKeyboardButton(text="🔗 Graflar nazariyasi", callback_data="menu_graphs"))
+    builder.row(types.InlineKeyboardButton(text="⚙️ Ikkilik mantiqiy elementlar", callback_data="menu_elements"))
+    builder.row(types.InlineKeyboardButton(text="📐 Diskret tuzilmalar va to'plamlar", callback_data="menu_discrete"))
+    builder.row(types.InlineKeyboardButton(text="🔢 Kombinatorika asoslari", callback_data="menu_combinatorics"))
+    builder.row(types.InlineKeyboardButton(text="💡 Erkin savol yuborish", callback_data="menu_free"))
     return builder.as_markup()
 
 @dp.message(Command("start"))
 async def start_handler(message: types.Message):
     await message.answer(
-        "🤖 **Math Logic Helper** — Sizning aqlli yordamchingiz!\n\n"
-        "Matematika, mantiq yoki istalgan mavzuda savol yuboring:",
+        "🤖 **Math Logic Helper** — Diskret matematika va mantiqiy tahlil yordamchisi!\n\n"
+        "Quyidagi bo'limlardan birini tanlang yoki o'zingizni qiziqtirgan masalani yuboring:",
         parse_mode="Markdown",
         reply_markup=get_main_menu()
     )
@@ -44,10 +50,11 @@ async def start_handler(message: types.Message):
 async def menu_handler(callback: types.CallbackQuery):
     action = callback.data.split("_")[1]
     prompts = {
-        "sets": "📊 To'plamlar nazariyasi bo'yicha savol yuboring:",
-        "combinatorics": "🔢 Kombinatorika bo'yicha savol yuboring:",
-        "relations": "🔗 Munosabatlar bo'yicha savol yuboring:",
-        "logic": "🧠 Mantiqiy masala yuboring:",
+        "boolean": "🔹 Bul algebrasi, mulohazalar va mantiqiy amallar bo'yicha savol yuboring:",
+        "graphs": "🔗 Graflar nazariyasining asosiy tushunchalari bo'yicha savol yuboring:",
+        "elements": "⚙️ Ikkilik mantiqiy elementlar bo'yicha savol yuboring:",
+        "discrete": "📐 Diskret tuzilmalar va to'plamlar bo'yicha savol yuboring:",
+        "combinatorics": "🔢 Kombinatorika qoidalari va uning tatbiqi bo'yicha savol yuboring:",
         "free": "💡 Istalgan mavzuda savolingizni yuboring:"
     }
     builder = InlineKeyboardBuilder()
@@ -66,27 +73,35 @@ async def handle_message(message: types.Message):
         return
 
     user_text = message.text
-    wait_msg = await message.answer("⏳ Tahlil qilinmoqda...")
+    wait_msg = await message.answer("⚡️ Tezkor tahlil qilinmoqda...")
+
+    system_prompt = (
+        "Siz diskret matematika, mantiq, bul algebrasi va graflar nazariyasi bo'yicha mutaxassis o'qituvchisisiz. "
+        "Foydalanuvchi yuborgan masalani o'zbek tilida, tushunarli, qadam-baqadam va aniq qilib yechib bering.\n\n"
+        f"Masala: {user_text}"
+    )
 
     response = None
-    # 503 xatosini chetlab o'tish uchun bir necha marta va turli modellar orqali urinib ko'ramiz
-    for attempt in range(3):
+    # Barcha modellarni ketma-ket tekshirib chiqamiz, qaysi biri ishlasa o'shandan javob olamiz
+    for attempt in range(2):  # 2 marta urinish sikli
         for model_name in MODELS:
             try:
+                logger.info(f"Model tekshirilmoqda: {model_name}")
                 response = await asyncio.to_thread(
                     client.models.generate_content,
                     model=model_name,
-                    contents=user_text
+                    contents=system_prompt
                 )
                 if response and response.text:
+                    logger.info(f"Muvaffaqiyatli model: {model_name}")
                     break
             except Exception as e:
-                logger.warning(f"Urinish {attempt+1} ({model_name}) xatosi: {e}")
+                logger.warning(f"Model {model_name} xatosi: {e}")
                 continue
         
         if response and response.text:
             break
-        await asyncio.sleep(2)  # 2 soniya kutib qayta urinadi
+        await asyncio.sleep(1)
 
     try:
         await bot.delete_message(message.chat.id, wait_msg.message_id)
@@ -96,11 +111,11 @@ async def handle_message(message: types.Message):
     if response and response.text:
         await message.answer(response.text, reply_markup=get_main_menu())
     else:
-        await message.answer("⚠️ Serverlar vaqtincha band. Iltimos, bir ozdan keyin qayta urinib ko'ring.", reply_markup=get_main_menu())
+        await message.answer("⚠️ Hozirda barcha serverlarda bandlik yuqori. Iltimos, bir soniyadan keyin qaytadan yuboring.", reply_markup=get_main_menu())
 
 async def main():
     await bot.delete_webhook(drop_pending_updates=True)
-    await bot.set_my_commands([types.BotCommand(command="start", description="Botni qayta ishga tushirish")])
+    await bot.set_my_commands([types.BotCommand(command="start", description="Botni ishga tushirish")])
     await dp.start_polling(bot)
 
 if __name__ == "__main__":
