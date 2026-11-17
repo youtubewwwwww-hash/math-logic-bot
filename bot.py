@@ -8,7 +8,11 @@ from aiogram.utils.keyboard import InlineKeyboardBuilder
 from google import genai
 from PIL import Image
 
-logging.basicConfig(level=logging.INFO)
+# Loggingni mukammal sozlarni (louch/log yozish uchun)
+logging.basicConfig(
+    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
+    level=logging.INFO
+)
 logger = logging.getLogger(__name__)
 
 BOT_TOKEN = os.getenv("BOT_TOKEN")
@@ -20,8 +24,7 @@ if not BOT_TOKEN or not GEMINI_API_KEY:
 bot = Bot(token=BOT_TOKEN)
 dp = Dispatcher()
 client = genai.Client(api_key=GEMINI_API_KEY)
-# Google talab qilayotgan va Interactions API'ni qo'llab-quvvatlaydigan model
-MODEL_NAME = "gemini-3.8-flash"
+MODEL_NAME = "gemini-1.5-flash"
 
 def get_main_menu():
     builder = InlineKeyboardBuilder()
@@ -32,14 +35,12 @@ def get_main_menu():
     builder.row(types.InlineKeyboardButton(text="💡 Boshqa savollar (Erkin rejim)", callback_data="menu_free"))
     return builder.as_markup()
 
-async def set_bot_commands(bot: Bot):
-    await bot.set_my_commands([types.BotCommand(command="start", description="Botni qayta ishga tushirish")])
-
 @dp.message(Command("start"))
 async def start_handler(message: types.Message):
+    logger.info(f"Start buyrug'i keldi: User ID {message.from_user.id}")
     await message.answer(
         "🤖 **Math Logic Helper** — Sizning aqlli yordamchingiz!\n\n"
-        "📊 Matematika, mantiq yoki istalgan mavzuda savol yuboring (rasm yoki matn):",
+        "Matematika, mantiq yoki istalgan mavzuda matn yoki rasm yuboring:",
         parse_mode="Markdown",
         reply_markup=get_main_menu()
     )
@@ -70,50 +71,60 @@ async def handle_message(message: types.Message):
         return
 
     user_text = message.text or message.caption or "Ushbu masalani yechib bering:"
-    wait_msg = await message.answer("⚡️ Tahlil qilinmoqda...")
+    logger.info(f"Foydalanuvchidan so'rov keldi (User ID: {message.from_user.id}): {user_text[:30]}...")
+    
+    wait_msg = await message.answer("⏳ Tahlil qilinmoqda...")
 
-    try:
-        # Google Interactions API standartiga mos ravishda chats/interactions orqali chaqiramiz
-        prompt = f"Matematika va mantiq o'qituvchisisiz. Ushbu savolni o'zbek tilida qadam-baqadam yechib bering:\n\n{user_text}"
-        contents = [prompt]
+    response = None
+    contents = [f"Matematika va mantiq o'qituvchisisiz. Ushbu savolni o'zbek tilida qadam-baqadam yechib bering:\n\n{user_text}"]
 
-        if message.photo:
+    if message.photo:
+        try:
+            logger.info("Rasm qabul qilindi, yuklab olinmoqda...")
             photo = message.photo[-1]
             file_info = await bot.get_file(photo.file_id)
             file_bytes = await bot.download_file(file_info.file_path)
             image = Image.open(io.BytesIO(file_bytes.read()))
             contents.append(image)
+        except Exception as e:
+            logger.error(f"Rasm yuklashda xatolik: {e}")
 
-        # Interactions API orqali so'rov yuborish
-        response = await asyncio.wait_for(
-            asyncio.to_thread(
-                client.chats.create(model=MODEL_NAME).send_message,
-                contents
-            ),
-            timeout=35.0
-        )
+    # Server band bo'lsa (503) avtomatik 3 marta qayta urinish loglari bilan
+    for attempt in range(3):
+        try:
+            response = await asyncio.to_thread(
+                client.models.generate_content,
+                model=MODEL_NAME,
+                contents=contents
+            )
+            break
+        except Exception as e:
+            logger.warning(f"Urinish {attempt + 1} muvaffaqiyatsiz: {e}")
+            if "503" in str(e) and attempt < 2:
+                await asyncio.sleep(2)
+                continue
+            else:
+                logger.error(f"Gemini API xatoligi: {e}")
+                try:
+                    await bot.delete_message(message.chat.id, wait_msg.message_id)
+                except:
+                    pass
+                await message.answer(f"❌ Xatolik yuz berdi. Qaytadan urinib ko'ring.", reply_markup=get_main_menu())
+                return
 
+    try:
         await bot.delete_message(message.chat.id, wait_msg.message_id)
-        await message.answer(response.text, reply_markup=get_main_menu())
-
-    except asyncio.TimeoutError:
-        try:
-            await bot.delete_message(message.chat.id, wait_msg.message_id)
-        except:
-            pass
-        await message.answer("⚠️ Server biroz kechikdi. Qaytadan yuborib ko'ring.", reply_markup=get_main_menu())
-
+        if response:
+            logger.info("Javob muvaffaqiyatli yuborildi.")
+            await message.answer(response.text, reply_markup=get_main_menu())
     except Exception as e:
-        logger.error(f"Xatolik: {e}")
-        try:
-            await bot.delete_message(message.chat.id, wait_msg.message_id)
-        except:
-            pass
-        await message.answer(f"❌ Xatolik yuz berdi:\n`{e}`", parse_mode="Markdown", reply_markup=get_main_menu())
+        logger.error(f"Javobni yuborishda xatolik: {e}")
+        await message.answer(f"❌ Xatolik: {e}", reply_markup=get_main_menu())
 
 async def main():
+    logger.info("Bot ishga tushmoqda...")
     await bot.delete_webhook(drop_pending_updates=True)
-    await set_bot_commands(bot)
+    await bot.set_my_commands([types.BotCommand(command="start", description="Botni qayta ishga tushirish")])
     await dp.start_polling(bot)
 
 if __name__ == "__main__":
